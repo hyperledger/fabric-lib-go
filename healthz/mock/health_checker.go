@@ -2,16 +2,19 @@
 package mock
 
 import (
+	"context"
 	"sync"
 
 	"github.com/hyperledger/fabric-lib-go/healthz"
 )
 
 type HealthChecker struct {
-	HealthCheckStub        func() (message string, ok bool)
+	HealthCheckStub        func(context.Context) (message string, ok bool)
 	healthCheckMutex       sync.RWMutex
-	healthCheckArgsForCall []struct{}
-	healthCheckReturns     struct {
+	healthCheckArgsForCall []struct {
+		arg1 context.Context
+	}
+	healthCheckReturns struct {
 		result1 string
 		result2 bool
 	}
@@ -23,14 +26,16 @@ type HealthChecker struct {
 	invocationsMutex sync.RWMutex
 }
 
-func (fake *HealthChecker) HealthCheck() (message string, ok bool) {
+func (fake *HealthChecker) HealthCheck(arg1 context.Context) (message string, ok bool) {
 	fake.healthCheckMutex.Lock()
 	ret, specificReturn := fake.healthCheckReturnsOnCall[len(fake.healthCheckArgsForCall)]
-	fake.healthCheckArgsForCall = append(fake.healthCheckArgsForCall, struct{}{})
-	fake.recordInvocation("HealthCheck", []interface{}{})
+	fake.healthCheckArgsForCall = append(fake.healthCheckArgsForCall, struct {
+		arg1 context.Context
+	}{arg1})
+	fake.recordInvocation("HealthCheck", []interface{}{arg1})
 	fake.healthCheckMutex.Unlock()
 	if fake.HealthCheckStub != nil {
-		return fake.HealthCheckStub()
+		return fake.HealthCheckStub(arg1)
 	}
 	if specificReturn {
 		return ret.result1, ret.result2
@@ -42,6 +47,12 @@ func (fake *HealthChecker) HealthCheckCallCount() int {
 	fake.healthCheckMutex.RLock()
 	defer fake.healthCheckMutex.RUnlock()
 	return len(fake.healthCheckArgsForCall)
+}
+
+func (fake *HealthChecker) HealthCheckArgsForCall(i int) context.Context {
+	fake.healthCheckMutex.RLock()
+	defer fake.healthCheckMutex.RUnlock()
+	return fake.healthCheckArgsForCall[i].arg1
 }
 
 func (fake *HealthChecker) HealthCheckReturns(result1 string, result2 bool) {

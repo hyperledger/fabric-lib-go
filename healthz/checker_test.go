@@ -8,6 +8,7 @@ package healthz_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
@@ -58,11 +59,12 @@ func TestRunChecks(t *testing.T) {
 	g := NewGomegaWithT(t)
 
 	handler := healthz.NewHealthHandler()
+	ctx := context.Background()
 
 	checker := &mock.HealthChecker{}
 	checker.HealthCheckReturns("", true)
 	handler.RegisterChecker("good_component", checker)
-	fc := handler.RunChecks()
+	fc := handler.RunChecks(ctx)
 	g.Expect(fc).To(HaveLen(0))
 
 	failedChecker := &mock.HealthChecker{}
@@ -71,7 +73,7 @@ func TestRunChecks(t *testing.T) {
 	failedChecker.HealthCheckReturnsOnCall(1, reason, false)
 	handler.RegisterChecker("bad_component1", failedChecker)
 	handler.RegisterChecker("bad_component2", failedChecker)
-	fc = handler.RunChecks()
+	fc = handler.RunChecks(ctx)
 	g.Expect(failedChecker.HealthCheckCallCount()).To(Equal(2))
 	g.Expect(fc).To(HaveLen(2))
 	g.Expect(fc).To(ContainElement(
@@ -103,7 +105,7 @@ func TestServeHTTP(t *testing.T) {
 			name: "Status OK",
 			healthCheckers: map[string]healthz.HealthChecker{
 				"component1": &mock.HealthChecker{
-					HealthCheckStub: func() (string, bool) {
+					HealthCheckStub: func(context.Context) (string, bool) {
 						return "", true
 					},
 				},
@@ -115,7 +117,7 @@ func TestServeHTTP(t *testing.T) {
 			name: "Service Unavailable",
 			healthCheckers: map[string]healthz.HealthChecker{
 				"component1": &mock.HealthChecker{
-					HealthCheckStub: func() (string, bool) {
+					HealthCheckStub: func(context.Context) (string, bool) {
 						return "poorly written code", false
 					},
 				},
@@ -133,12 +135,12 @@ func TestServeHTTP(t *testing.T) {
 			name: "Service Unavailable - Multiple",
 			healthCheckers: map[string]healthz.HealthChecker{
 				"component1": &mock.HealthChecker{
-					HealthCheckStub: func() (string, bool) {
+					HealthCheckStub: func(context.Context) (string, bool) {
 						return "poorly written code", false
 					},
 				},
 				"component2": &mock.HealthChecker{
-					HealthCheckStub: func() (string, bool) {
+					HealthCheckStub: func(context.Context) (string, bool) {
 						return "more poorly written code", false
 					},
 				},
@@ -160,12 +162,12 @@ func TestServeHTTP(t *testing.T) {
 			name: "Mixed",
 			healthCheckers: map[string]healthz.HealthChecker{
 				"component1": &mock.HealthChecker{
-					HealthCheckStub: func() (string, bool) {
+					HealthCheckStub: func(context.Context) (string, bool) {
 						return "poorly written code", false
 					},
 				},
 				"component2": &mock.HealthChecker{
-					HealthCheckStub: func() (string, bool) {
+					HealthCheckStub: func(context.Context) (string, bool) {
 						return "", true
 					},
 				},
@@ -219,6 +221,46 @@ func TestServeHTTP(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServeHTTP_Timeout(t *testing.T) {
+	t.Parallel()
+	g := NewGomegaWithT(t)
+
+	hc := &mock.HealthChecker{
+		HealthCheckStub: func(ctx context.Context) (string, bool) {
+			select {
+			case <-ctx.Done():
+				t.Log("done called")
+				return "", false
+			}
+		},
+	}
+
+	hh := healthz.NewHealthHandler()
+	hh.SetTimeout(2 * time.Millisecond)
+	err := hh.RegisterChecker("long_running", hc)
+	if err != nil {
+		t.Fatalf("error registering checker [%s]", err)
+	}
+	ts := httptest.NewServer(hh)
+	defer ts.Close()
+
+	res, err := ts.Client().Get(ts.URL)
+	if err != nil {
+		t.Fatalf("Error getting response [%s]", err)
+	}
+	g.Expect(res.StatusCode).To(Equal(http.StatusRequestTimeout))
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Failed to create request [%s]", err)
+	}
+	ctx, _ := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	res, err = ts.Client().Do(req.WithContext(ctx))
+	g.Expect(res).To(BeNil())
+	g.Expect(err).To(HaveOccurred())
+
 }
 
 func TestHandleGetOnly(t *testing.T) {

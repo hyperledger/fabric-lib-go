@@ -9,6 +9,7 @@ SPDX-License-Identifier: Apache-2.0
 package healthz
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -33,8 +34,10 @@ const (
 
 // HealthChecker defines the interface components must implement in order to
 // register with the Handler in order to be included in the health status.
+// HealthCheck is passed a context with a Done channel which is closed due to
+// a timeout or cancellation.
 type HealthChecker interface {
-	HealthCheck() (message string, ok bool)
+	HealthCheck(context.Context) (message string, ok bool)
 }
 
 // FailedCheck represents a failed status check for a component.
@@ -55,6 +58,7 @@ func NewHealthHandler() *HealthHandler {
 	return &HealthHandler{
 		healthCheckers: map[string]HealthChecker{},
 		now:            time.Now,
+		timeout:        30 * time.Second,
 	}
 }
 
@@ -65,6 +69,7 @@ type HealthHandler struct {
 	mutex          sync.RWMutex
 	healthCheckers map[string]HealthChecker
 	now            func() time.Time
+	timeout        time.Duration
 }
 
 // RegisterChecker registers a HealthChecker for a named component and adds it to
@@ -88,6 +93,12 @@ func (h *HealthHandler) DeregisterChecker(component string) {
 	delete(h.healthCheckers, component)
 }
 
+// SetTimeout sets the timeout for handling HTTP requests.  If not explicitly
+// set, defaults to 30 seconds.
+func (h *HealthHandler) SetTimeout(timeout time.Duration) {
+	h.timeout = timeout
+}
+
 // ServerHTTP is an HTTP handler (see http.Handler) which can be used as
 // an HTTP endpoint for health checks.  If all registered checks pass, it returns
 // an HTTP status `200 OK` with a JSON payload of `{"status": "OK"}`.  If all
@@ -98,28 +109,40 @@ func (h *HealthHandler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		rw.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	hs := HealthStatus{
-		Status: StatusOK,
-		Time:   h.now(),
-	}
+	checksCtx, cancel := context.WithTimeout(req.Context(), h.timeout)
+	defer cancel()
 
-	failedChecks := h.RunChecks()
-	if len(failedChecks) > 0 {
-		hs.Status = StatusUnavailable
-		hs.FailedChecks = failedChecks
+	failedCheckCh := make(chan []FailedCheck)
+	go func() {
+		failedCheckCh <- h.RunChecks(checksCtx)
+	}()
+
+	select {
+	case failedChecks := <-failedCheckCh:
+		hs := HealthStatus{
+			Status: StatusOK,
+			Time:   h.now(),
+		}
+		if len(failedChecks) > 0 {
+			hs.Status = StatusUnavailable
+			hs.FailedChecks = failedChecks
+		}
+		writeHTTPResponse(rw, hs)
+	case <-checksCtx.Done():
+		if checksCtx.Err() == context.DeadlineExceeded {
+			rw.WriteHeader(http.StatusRequestTimeout)
+		}
 	}
-	writeHTTPResponse(rw, hs)
 }
 
 // RunChecks runs all healthCheckers and returns any failures.
-func (h *HealthHandler) RunChecks() []FailedCheck {
+func (h *HealthHandler) RunChecks(ctx context.Context) []FailedCheck {
 	h.mutex.RLock()
 	defer h.mutex.RUnlock()
 
 	var failedChecks []FailedCheck
-
 	for component, checker := range h.healthCheckers {
-		if reason, ok := checker.HealthCheck(); !ok {
+		if reason, ok := checker.HealthCheck(ctx); !ok {
 			failedCheck := FailedCheck{
 				Component: component,
 				Reason:    reason,
@@ -134,25 +157,14 @@ func (h *HealthHandler) RunChecks() []FailedCheck {
 func writeHTTPResponse(rw http.ResponseWriter, hs HealthStatus) {
 	var resp []byte
 	rc := http.StatusOK
+	rw.Header().Set("Content-Type", "application/json")
 	if len(hs.FailedChecks) > 0 {
 		rc = http.StatusServiceUnavailable
 	}
 	resp, err := json.Marshal(hs)
 	if err != nil {
-		resp, _ = json.Marshal(
-			HealthStatus{
-				Status: StatusUnavailable,
-				Time:   time.Now(),
-				FailedChecks: []FailedCheck{
-					FailedCheck{
-						Component: "internal",
-						Reason:    "server error",
-					},
-				},
-			},
-		)
+		rc = http.StatusInternalServerError
 	}
-	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(rc)
 	rw.Write(resp)
 }
