@@ -37,7 +37,7 @@ const (
 // HealthCheck is passed a context with a Done channel which is closed due to
 // a timeout or cancellation.
 type HealthChecker interface {
-	HealthCheck(context.Context) (message string, ok bool)
+	HealthCheck(context.Context) error
 }
 
 // FailedCheck represents a failed status check for a component.
@@ -142,10 +142,10 @@ func (h *HealthHandler) RunChecks(ctx context.Context) []FailedCheck {
 
 	var failedChecks []FailedCheck
 	for component, checker := range h.healthCheckers {
-		if reason, ok := checker.HealthCheck(ctx); !ok {
+		if err := checker.HealthCheck(ctx); err != nil {
 			failedCheck := FailedCheck{
 				Component: component,
-				Reason:    reason,
+				Reason:    err.Error(),
 			}
 			failedChecks = append(failedChecks, failedCheck)
 		}

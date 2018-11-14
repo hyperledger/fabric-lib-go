@@ -2,31 +2,29 @@
 package mock
 
 import (
-	"context"
-	"sync"
+	context "context"
+	sync "sync"
 
-	"github.com/hyperledger/fabric-lib-go/healthz"
+	healthz "github.com/hyperledger/fabric-lib-go/healthz"
 )
 
 type HealthChecker struct {
-	HealthCheckStub        func(context.Context) (message string, ok bool)
+	HealthCheckStub        func(context.Context) error
 	healthCheckMutex       sync.RWMutex
 	healthCheckArgsForCall []struct {
 		arg1 context.Context
 	}
 	healthCheckReturns struct {
-		result1 string
-		result2 bool
+		result1 error
 	}
 	healthCheckReturnsOnCall map[int]struct {
-		result1 string
-		result2 bool
+		result1 error
 	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
 }
 
-func (fake *HealthChecker) HealthCheck(arg1 context.Context) (message string, ok bool) {
+func (fake *HealthChecker) HealthCheck(arg1 context.Context) error {
 	fake.healthCheckMutex.Lock()
 	ret, specificReturn := fake.healthCheckReturnsOnCall[len(fake.healthCheckArgsForCall)]
 	fake.healthCheckArgsForCall = append(fake.healthCheckArgsForCall, struct {
@@ -38,9 +36,10 @@ func (fake *HealthChecker) HealthCheck(arg1 context.Context) (message string, ok
 		return fake.HealthCheckStub(arg1)
 	}
 	if specificReturn {
-		return ret.result1, ret.result2
+		return ret.result1
 	}
-	return fake.healthCheckReturns.result1, fake.healthCheckReturns.result2
+	fakeReturns := fake.healthCheckReturns
+	return fakeReturns.result1
 }
 
 func (fake *HealthChecker) HealthCheckCallCount() int {
@@ -49,32 +48,40 @@ func (fake *HealthChecker) HealthCheckCallCount() int {
 	return len(fake.healthCheckArgsForCall)
 }
 
+func (fake *HealthChecker) HealthCheckCalls(stub func(context.Context) error) {
+	fake.healthCheckMutex.Lock()
+	defer fake.healthCheckMutex.Unlock()
+	fake.HealthCheckStub = stub
+}
+
 func (fake *HealthChecker) HealthCheckArgsForCall(i int) context.Context {
 	fake.healthCheckMutex.RLock()
 	defer fake.healthCheckMutex.RUnlock()
-	return fake.healthCheckArgsForCall[i].arg1
+	argsForCall := fake.healthCheckArgsForCall[i]
+	return argsForCall.arg1
 }
 
-func (fake *HealthChecker) HealthCheckReturns(result1 string, result2 bool) {
+func (fake *HealthChecker) HealthCheckReturns(result1 error) {
+	fake.healthCheckMutex.Lock()
+	defer fake.healthCheckMutex.Unlock()
 	fake.HealthCheckStub = nil
 	fake.healthCheckReturns = struct {
-		result1 string
-		result2 bool
-	}{result1, result2}
+		result1 error
+	}{result1}
 }
 
-func (fake *HealthChecker) HealthCheckReturnsOnCall(i int, result1 string, result2 bool) {
+func (fake *HealthChecker) HealthCheckReturnsOnCall(i int, result1 error) {
+	fake.healthCheckMutex.Lock()
+	defer fake.healthCheckMutex.Unlock()
 	fake.HealthCheckStub = nil
 	if fake.healthCheckReturnsOnCall == nil {
 		fake.healthCheckReturnsOnCall = make(map[int]struct {
-			result1 string
-			result2 bool
+			result1 error
 		})
 	}
 	fake.healthCheckReturnsOnCall[i] = struct {
-		result1 string
-		result2 bool
-	}{result1, result2}
+		result1 error
+	}{result1}
 }
 
 func (fake *HealthChecker) Invocations() map[string][][]interface{} {

@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -62,15 +63,15 @@ func TestRunChecks(t *testing.T) {
 	ctx := context.Background()
 
 	checker := &mock.HealthChecker{}
-	checker.HealthCheckReturns("", true)
+	checker.HealthCheckReturns(nil)
 	handler.RegisterChecker("good_component", checker)
 	fc := handler.RunChecks(ctx)
 	g.Expect(fc).To(HaveLen(0))
 
 	failedChecker := &mock.HealthChecker{}
 	reason := "poorly written code"
-	failedChecker.HealthCheckReturnsOnCall(0, reason, false)
-	failedChecker.HealthCheckReturnsOnCall(1, reason, false)
+	failedChecker.HealthCheckReturnsOnCall(0, errors.New(reason))
+	failedChecker.HealthCheckReturnsOnCall(1, errors.New(reason))
 	handler.RegisterChecker("bad_component1", failedChecker)
 	handler.RegisterChecker("bad_component2", failedChecker)
 	fc = handler.RunChecks(ctx)
@@ -105,8 +106,8 @@ func TestServeHTTP(t *testing.T) {
 			name: "Status OK",
 			healthCheckers: map[string]healthz.HealthChecker{
 				"component1": &mock.HealthChecker{
-					HealthCheckStub: func(context.Context) (string, bool) {
-						return "", true
+					HealthCheckStub: func(context.Context) error {
+						return nil
 					},
 				},
 			},
@@ -117,8 +118,8 @@ func TestServeHTTP(t *testing.T) {
 			name: "Service Unavailable",
 			healthCheckers: map[string]healthz.HealthChecker{
 				"component1": &mock.HealthChecker{
-					HealthCheckStub: func(context.Context) (string, bool) {
-						return "poorly written code", false
+					HealthCheckStub: func(context.Context) error {
+						return errors.New("poorly written code")
 					},
 				},
 			},
@@ -135,13 +136,13 @@ func TestServeHTTP(t *testing.T) {
 			name: "Service Unavailable - Multiple",
 			healthCheckers: map[string]healthz.HealthChecker{
 				"component1": &mock.HealthChecker{
-					HealthCheckStub: func(context.Context) (string, bool) {
-						return "poorly written code", false
+					HealthCheckStub: func(context.Context) error {
+						return errors.New("poorly written code")
 					},
 				},
 				"component2": &mock.HealthChecker{
-					HealthCheckStub: func(context.Context) (string, bool) {
-						return "more poorly written code", false
+					HealthCheckStub: func(context.Context) error {
+						return errors.New("more poorly written code")
 					},
 				},
 			},
@@ -162,13 +163,13 @@ func TestServeHTTP(t *testing.T) {
 			name: "Mixed",
 			healthCheckers: map[string]healthz.HealthChecker{
 				"component1": &mock.HealthChecker{
-					HealthCheckStub: func(context.Context) (string, bool) {
-						return "poorly written code", false
+					HealthCheckStub: func(context.Context) error {
+						return errors.New("poorly written code")
 					},
 				},
 				"component2": &mock.HealthChecker{
-					HealthCheckStub: func(context.Context) (string, bool) {
-						return "", true
+					HealthCheckStub: func(context.Context) error {
+						return nil
 					},
 				},
 			},
@@ -228,11 +229,11 @@ func TestServeHTTP_Timeout(t *testing.T) {
 	g := NewGomegaWithT(t)
 
 	hc := &mock.HealthChecker{
-		HealthCheckStub: func(ctx context.Context) (string, bool) {
+		HealthCheckStub: func(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				t.Log("done called")
-				return "", false
+				return errors.New("check failed")
 			}
 		},
 	}
