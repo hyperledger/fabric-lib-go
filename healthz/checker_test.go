@@ -257,7 +257,8 @@ func TestServeHTTP_Timeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create request [%s]", err)
 	}
-	ctx, _ := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
 	res, err = ts.Client().Do(req.WithContext(ctx))
 	g.Expect(res).To(BeNil())
 	g.Expect(err).To(HaveOccurred())
