@@ -13,7 +13,7 @@
 
 all: checks unit-tests
 
-checks: license vet fmtcheck
+checks: license vet gotools fmtcheck
 
 .PHONY: fmtcheck
 fmtcheck:
@@ -25,12 +25,17 @@ license:
 	@echo "Checking for license headers..."
 	@scripts/check-license.sh
 
-.PHONY: unit-tests
-unit-tests:
-	@echo "Running unit tests..."
-	@scripts/run-unit-tests.sh
-
 .PHONY: vet
 vet:
 	@echo "Running go vet..."
 	@scripts/run-go-vet.sh
+
+.PHONY: gotools
+gotools:
+	@echo "Installing goimports..."
+	@go get golang.org/x/tools/cmd/goimports
+
+.PHONY: unit-tests
+unit-tests:
+	@echo "Running unit tests..."
+	@scripts/run-unit-tests.sh

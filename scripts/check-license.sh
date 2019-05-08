@@ -1,11 +1,12 @@
 #!/bin/bash -eu
+
 #
 # Copyright IBM Corp. All Rights Reserved.
 #
 # SPDX-License-Identifier: Apache-2.0
+#
 
-scripts_dir=$(cd $(dirname $0) && pwd)
-source "${scripts_dir}/common.sh"
+source "$(dirname $0)/common.sh"
 
 license_excluded_file_patterns=(
     ".git$"
