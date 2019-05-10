@@ -239,7 +239,7 @@ func TestServeHTTP_Timeout(t *testing.T) {
 	}
 
 	hh := healthz.NewHealthHandler()
-	hh.SetTimeout(2 * time.Millisecond)
+	hh.SetTimeout(time.Second)
 	err := hh.RegisterChecker("long_running", hc)
 	if err != nil {
 		t.Fatalf("error registering checker [%s]", err)
