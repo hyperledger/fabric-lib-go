@@ -17,10 +17,10 @@ timeout(40) {
         }
 
         stage("Cleanup Environment") {
-          wrap([$class: 'AnsiColorBuildWrapper', 'colorMapName': 'xterm']) {
+         // wrap([$class: 'AnsiColorBuildWrapper', 'colorMapName': 'xterm']) {
             fabBuildLibrary.cleanupEnv() // Cleanup the leftover build artifacts
             fabBuildLibrary.envOutput() //  Output Jenkins environment details on the console
-          }
+         // }
         }
 
         stage("Checkout SCM") {
@@ -40,7 +40,7 @@ timeout(40) {
 
         // Run Checks
         stage("Checks") {
-          wrap([$class: 'AnsiColorBuildWrapper', 'colorMapName': 'xterm']) {
+          // wrap([$class: 'AnsiColorBuildWrapper', 'colorMapName': 'xterm']) {
             try {
               dir("${WORKSPACE}/${BASE_DIR}") {
                 sh 'make checks'
@@ -51,12 +51,12 @@ timeout(40) {
               currentBuild.result = 'FAILURE'
               throw err
             }
-          }
+          // }
         }
 
         // Run Unit-Tests
         stage("Unit Tests") {
-          wrap([$class: 'AnsiColorBuildWrapper', 'colorMapName': 'xterm']) {
+          // wrap([$class: 'AnsiColorBuildWrapper', 'colorMapName': 'xterm']) {
             try {
               dir("${WORKSPACE}/${BASE_DIR}") {
                 sh 'make unit-tests'
@@ -67,7 +67,7 @@ timeout(40) {
               currentBuild.result = 'FAILURE'
               throw err
             }
-          }
+          // }
         }
       }
       finally {
