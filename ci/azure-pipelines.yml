@@ -1,0 +1,27 @@
+# Copyright the Hyperledger Fabric contributors. All rights reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: $(SourceBranchName)-$(Date:yyyyMMdd)$(Rev:.rrr)
+trigger:
+- master
+
+variables:
+  GOPATH: $(Agent.BuildDirectory)/go
+  GOVER: 1.11.5
+  PATH: $(Agent.BuildDirectory)/go/bin:/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+
+pool:
+  vmImage: ubuntu-16.04
+
+steps:
+- task: GoTool@0
+  inputs:
+    version: $(GOVER)
+    goPath:  $(GOPATH)
+  displayName: Install GoLang
+- checkout: self
+  path: 'go/src/github.com/hyperledger/fabric-lib-go'
+  displayName: Checkout Fabric-Lib-Go Code
+- script: make checks unit-tests
+  displayName: Run Checks and Unit Tests
