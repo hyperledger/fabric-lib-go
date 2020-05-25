@@ -9,6 +9,8 @@
 #   - unit-test     - runs the go-test based unit tests
 #   - checks        - runs vet and go format checks
 
+GOTOOLS_BINDIR ?= $(shell go env GOPATH)/bin
+
 .PHONY: all checks
 
 all: checks unit-tests
@@ -33,7 +35,7 @@ vet:
 .PHONY: gotools
 gotools:
 	@echo "Installing goimports..."
-	@go get golang.org/x/tools/cmd/goimports
+	@cd tools && GOBIN=$(abspath $(GOTOOLS_BINDIR)) go get golang.org/x/tools/cmd/goimports
 
 .PHONY: unit-tests
 unit-tests:

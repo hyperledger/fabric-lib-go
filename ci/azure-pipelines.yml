@@ -7,21 +7,19 @@ trigger:
 - master
 
 variables:
-  GOPATH: $(Agent.BuildDirectory)/go
-  GOVER: 1.11.5
+  GOVER: 1.14.3
   PATH: $(Agent.BuildDirectory)/go/bin:/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 
 pool:
-  vmImage: ubuntu-16.04
+  vmImage: ubuntu-18.04
 
 steps:
 - task: GoTool@0
   inputs:
     version: $(GOVER)
-    goPath:  $(GOPATH)
-  displayName: Install GoLang
+  displayName: Install Go
 - checkout: self
-  path: 'go/src/github.com/hyperledger/fabric-lib-go'
+  path: 'src/fabric-lib-go'
   displayName: Checkout Fabric-Lib-Go Code
-- script: make checks unit-tests
+- script: make checks unit-tests GOTOOLS_BINDIR=$(Agent.BuildDirectory)/go/bin
   displayName: Run Checks and Unit Tests
