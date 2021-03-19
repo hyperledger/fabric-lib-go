@@ -4,7 +4,7 @@
 
 name: $(SourceBranchName)-$(Date:yyyyMMdd)$(Rev:.rrr)
 trigger:
-- master
+- main
 
 variables:
   GOVER: 1.14.3
