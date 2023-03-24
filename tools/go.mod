@@ -1,5 +1,10 @@
 module github.com/hyperledger/fabric-lib-go/tools
 
-go 1.14
+go 1.20
 
-require golang.org/x/tools v0.0.0-20200522201501-cb1345f3a375 // indirect
+require golang.org/x/tools v0.7.0
+
+require (
+	golang.org/x/mod v0.9.0 // indirect
+	golang.org/x/sys v0.6.0 // indirect
+)
