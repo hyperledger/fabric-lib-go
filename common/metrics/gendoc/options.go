@@ -25,7 +25,6 @@ func Options(pkgs []*packages.Package) ([]interface{}, error) {
 	var options []interface{}
 	for _, p := range pkgs {
 		for _, f := range p.Syntax {
-			fmt.Println(f.Name.Name)
 			opts, err := FileOptions(f)
 			if err != nil {
 				return nil, err
