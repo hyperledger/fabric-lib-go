@@ -5,15 +5,15 @@ name: Verify Build
 on:
   push:
     branches:
-      - main
+      - "**"
   pull_request:
     branches:
-      - main
+      - "**"
 
 env:
   GOPATH: /opt/go
   PATH: /opt/go/bin:/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin
-  GO_VER: 1.20.2
+  GO_VER: 1.21.6
 
 jobs:
   unit-tests:
