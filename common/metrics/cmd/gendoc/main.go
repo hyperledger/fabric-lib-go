@@ -9,7 +9,6 @@ package main
 import (
 	"bytes"
 	"flag"
-	"fmt"
 	"os"
 	"text/template"
 
@@ -35,26 +34,22 @@ func main() {
 		patterns = []string{"github.com/hyperledger/fabric/..."}
 	}
 
-	fmt.Println("Loading for", patterns[0])
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedSyntax | packages.NeedTypesInfo
 	pkgs, err := packages.Load(&packages.Config{Mode: mode}, patterns...)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("Options")
 	options, err := gendoc.Options(pkgs)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("NewCells")
 	cells, err := gendoc.NewCells(options)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("FuncMap")
 	funcMap := template.FuncMap{
 		"PrometheusTable": func() string {
 			buf := &bytes.Buffer{}
@@ -73,13 +68,11 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Println("New template")
 	tmpl, err := template.New("metrics_reference").Funcs(funcMap).Parse(string(docTemplate))
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("Execute")
 	if err := tmpl.Execute(os.Stdout, ""); err != nil {
 		panic(err)
 	}
