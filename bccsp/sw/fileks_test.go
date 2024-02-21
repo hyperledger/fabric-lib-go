@@ -8,6 +8,7 @@ package sw
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"fmt"
@@ -39,6 +40,16 @@ func TestInvalidStoreKey(t *testing.T) {
 	}
 
 	err = ks.StoreKey(&ecdsaPublicKey{nil})
+	if err == nil {
+		t.Fatal("Error should be different from nil in this case")
+	}
+
+	err = ks.StoreKey(&ed25519PrivateKey{nil})
+	if err == nil {
+		t.Fatal("Error should be different from nil in this case")
+	}
+
+	err = ks.StoreKey(&ed25519PublicKey{nil})
 	if err == nil {
 		t.Fatal("Error should be different from nil in this case")
 	}
@@ -131,4 +142,29 @@ func TestDirEmpty(t *testing.T) {
 	r, err = dirEmpty(os.TempDir())
 	require.NoError(t, err)
 	require.Equal(t, false, r)
+}
+
+func TestStoreAndGetEd25519Keys(t *testing.T) {
+	ksPath, err := os.MkdirTemp("", "bccspks")
+	require.NoError(t, err)
+	defer os.RemoveAll(ksPath)
+
+	ks, err := NewFileBasedKeyStore(nil, filepath.Join(tempDir, "bccspks"), false)
+	require.NoError(t, err)
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	ed25519FabricPriv := &ed25519PrivateKey{privKey: &priv}
+	ed25519FabricPub := &ed25519PublicKey{pubKey: &pub}
+
+	err = ks.StoreKey(ed25519FabricPriv)
+	require.NoError(t, err)
+	_, err = ks.GetKey(ed25519FabricPriv.SKI())
+	require.NoError(t, err)
+
+	err = ks.StoreKey(ed25519FabricPub)
+	require.NoError(t, err)
+	_, err = ks.GetKey(ed25519FabricPub.SKI())
+	require.NoError(t, err)
 }
