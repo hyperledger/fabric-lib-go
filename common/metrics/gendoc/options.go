@@ -73,7 +73,7 @@ func FileOptions(f *ast.File) ([]interface{}, error) {
 					continue
 				}
 				if imports[ident.Name] != "github.com/hyperledger/fabric-lib-go/common/metrics" &&
-					imports[ident.Name] != "github.com/SmartBFT-Go/consensus/pkg/metrics" {
+					imports[ident.Name] != "github.com/hyperledger-labs/SmartBFT/pkg/metrics" {
 					continue
 				}
 				option, err := createOption(literalType)
