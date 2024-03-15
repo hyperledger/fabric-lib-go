@@ -161,6 +161,35 @@ func TestECDSAPrivateKeyImportOptsKeyImporter(t *testing.T) {
 	require.Contains(t, err.Error(), "Failed casting to ECDSA private key. Invalid raw material.")
 }
 
+func TestED25519PrivateKeyImportOptsKeyImporter(t *testing.T) {
+	t.Parallel()
+
+	ki := ed25519PrivateKeyImportOptsKeyImporter{}
+
+	_, err := ki.KeyImport("Hello World", &mocks2.KeyImportOpts{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Invalid raw material. Expected byte array.")
+
+	_, err = ki.KeyImport(nil, &mocks2.KeyImportOpts{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Invalid raw material. Expected byte array.")
+
+	_, err = ki.KeyImport([]byte(nil), &mocks2.KeyImportOpts{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Invalid raw. It must not be nil.")
+
+	_, err = ki.KeyImport([]byte{0}, &mocks2.KeyImportOpts{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Failed converting PKIX to ED25519 public key")
+
+	k, err := rsa.GenerateKey(rand.Reader, 512)
+	require.NoError(t, err)
+	raw := x509.MarshalPKCS1PrivateKey(k)
+	_, err = ki.KeyImport(raw, &mocks2.KeyImportOpts{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Failed casting to ED25519 private key. Invalid raw material.")
+}
+
 func TestECDSAGoPublicKeyImportOptsKeyImporter(t *testing.T) {
 	t.Parallel()
 
@@ -173,6 +202,20 @@ func TestECDSAGoPublicKeyImportOptsKeyImporter(t *testing.T) {
 	_, err = ki.KeyImport(nil, &mocks2.KeyImportOpts{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Invalid raw material. Expected *ecdsa.PublicKey.")
+}
+
+func TestED25519GoPublicKeyImportOptsKeyImporter(t *testing.T) {
+	t.Parallel()
+
+	ki := ed25519GoPublicKeyImportOptsKeyImporter{}
+
+	_, err := ki.KeyImport("Hello World", &mocks2.KeyImportOpts{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Invalid raw material. Expected *ed25519.PublicKey.")
+
+	_, err = ki.KeyImport(nil, &mocks2.KeyImportOpts{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Invalid raw material. Expected *ed25519.PublicKey.")
 }
 
 func TestX509PublicKeyImportOptsKeyImporter(t *testing.T) {
@@ -192,7 +235,7 @@ func TestX509PublicKeyImportOptsKeyImporter(t *testing.T) {
 	cert.PublicKey = "Hello world"
 	_, err = ki.KeyImport(cert, &mocks2.KeyImportOpts{})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "Certificate's public key type not recognized. Supported keys: [ECDSA, RSA]")
+	require.Contains(t, err.Error(), "Certificate's public key type not recognized. Supported keys: [ECDSA, ED25519, RSA]")
 }
 
 func TestX509RSAKeyImport(t *testing.T) {
