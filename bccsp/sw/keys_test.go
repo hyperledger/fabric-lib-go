@@ -8,6 +8,7 @@ package sw
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
@@ -300,6 +301,98 @@ func TestECDSAKeys(t *testing.T) {
 	}
 }
 
+func TestED25519Keys(t *testing.T) {
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed generating ED25519 key [%s]", err)
+	}
+
+	// Private Key DER format
+	der, err := privateKeyToDER(&key)
+	if err != nil {
+		t.Fatalf("Failed converting private key to DER [%s]", err)
+	}
+	_, err = derToPrivateKey(der)
+	if err != nil {
+		t.Fatalf("Failed converting DER to private key [%s]", err)
+	}
+
+	rawPEM, err := privateKeyToPEM(&key, nil)
+	if err != nil {
+		t.Fatalf("Failed converting private key to PEM [%s]", err)
+	}
+	pemBlock, _ := pem.Decode(rawPEM)
+	if pemBlock.Type != "PRIVATE KEY" {
+		t.Fatalf("Expected type 'PRIVATE KEY' but found '%s'", pemBlock.Type)
+	}
+	_, err = x509.ParsePKCS8PrivateKey(pemBlock.Bytes)
+	if err != nil {
+		t.Fatalf("Failed to parse PKCS#8 private key [%s]", err)
+	}
+	_, err = pemToPrivateKey(rawPEM, nil)
+	if err != nil {
+		t.Fatalf("Failed converting DER to private key [%s]", err)
+	}
+
+	_, err = privateKeyToPEM((ed25519.PrivateKey)(nil), nil)
+	if err == nil {
+		t.Fatal("PrivateKeyToPEM should fail on nil")
+	}
+
+	encPEM, err := privateKeyToPEM(&key, []byte("passwd"))
+	if err != nil {
+		t.Fatalf("Failed converting private key to encrypted PEM [%s]", err)
+	}
+	_, err = pemToPrivateKey(encPEM, nil)
+	require.Error(t, err)
+	_, err = pemToPrivateKey(encPEM, []byte("passwd"))
+	if err != nil {
+		t.Fatalf("Failed converting DER to private key [%s]", err)
+	}
+
+	// Public Key PEM format
+	rawPEM, err = publicKeyToPEM(&pub, nil)
+	if err != nil {
+		t.Fatalf("Failed converting public key to PEM [%s]", err)
+	}
+	pemBlock, _ = pem.Decode(rawPEM)
+	if pemBlock.Type != "PUBLIC KEY" {
+		t.Fatalf("Expected type 'PUBLIC KEY' but found '%s'", pemBlock.Type)
+	}
+	_, err = pemToPublicKey(rawPEM, nil)
+	if err != nil {
+		t.Fatalf("Failed converting DER to public key [%s]", err)
+	}
+
+	// Public Key Encrypted PEM format
+	encPEM, err = publicKeyToPEM(&pub, []byte("passwd"))
+	if err != nil {
+		t.Fatalf("Failed converting private key to encrypted PEM [%s]", err)
+	}
+	_, err = pemToPublicKey(encPEM, nil)
+	require.Error(t, err)
+	_, err = pemToPublicKey(encPEM, []byte("passwd"))
+	if err != nil {
+		t.Fatalf("Failed converting DER to private key [%s]", err)
+	}
+
+	_, err = pemToPublicKey(encPEM, []byte("passw"))
+	if err == nil {
+		t.Fatal("PEMtoPublicKey should fail on wrong password")
+	}
+
+	_, err = pemToPublicKey(encPEM, []byte("passw"))
+	if err == nil {
+		t.Fatal("PEMtoPublicKey should fail on nil password")
+	}
+
+	// Public Key DER format
+	der, err = x509.MarshalPKIXPublicKey(pub)
+	require.NoError(t, err)
+	_, err = derToPublicKey(der)
+	require.NoError(t, err)
+}
+
 func TestAESKey(t *testing.T) {
 	k := []byte{0, 1, 2, 3, 4, 5}
 	pem := aesToPEM(k)
@@ -337,6 +430,8 @@ func TestNil(t *testing.T) {
 
 	_, err = privateKeyToEncryptedPEM((*ecdsa.PrivateKey)(nil), nil)
 	require.Error(t, err)
+	_, err = privateKeyToEncryptedPEM((ed25519.PrivateKey)(nil), nil)
+	require.Error(t, err)
 
 	_, err = privateKeyToEncryptedPEM("Hello World", nil)
 	require.Error(t, err)
@@ -350,6 +445,8 @@ func TestNil(t *testing.T) {
 	_, err = publicKeyToPEM(nil, nil)
 	require.Error(t, err)
 	_, err = publicKeyToPEM((*ecdsa.PublicKey)(nil), nil)
+	require.Error(t, err)
+	_, err = publicKeyToPEM((ed25519.PublicKey)(nil), nil)
 	require.Error(t, err)
 	_, err = publicKeyToPEM(nil, []byte("hello world"))
 	require.Error(t, err)
