@@ -1,8 +1,6 @@
 module github.com/hyperledger/fabric-lib-go
 
-go 1.22.0
-
-toolchain go1.23.0
+go 1.23.4
 
 require (
 	github.com/go-kit/kit v0.13.0
