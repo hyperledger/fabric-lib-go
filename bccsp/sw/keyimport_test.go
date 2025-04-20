@@ -123,7 +123,7 @@ func TestECDSAPKIXPublicKeyImportOptsKeyImporter(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Failed converting PKIX to ECDSA public key [")
 
-	k, err := rsa.GenerateKey(rand.Reader, 512)
+	k, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	raw, err := x509.MarshalPKIXPublicKey(&k.PublicKey)
 	require.NoError(t, err)
@@ -153,7 +153,7 @@ func TestECDSAPrivateKeyImportOptsKeyImporter(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Failed converting PKIX to ECDSA public key")
 
-	k, err := rsa.GenerateKey(rand.Reader, 512)
+	k, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	raw := x509.MarshalPKCS1PrivateKey(k)
 	_, err = ki.KeyImport(raw, &mocks2.KeyImportOpts{})
@@ -182,7 +182,7 @@ func TestED25519PrivateKeyImportOptsKeyImporter(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Failed converting PKIX to ED25519 public key")
 
-	k, err := rsa.GenerateKey(rand.Reader, 512)
+	k, err := rsa.GenerateKey(rand.Reader, 1024)
 	require.NoError(t, err)
 	raw := x509.MarshalPKCS1PrivateKey(k)
 	_, err = ki.KeyImport(raw, &mocks2.KeyImportOpts{})
