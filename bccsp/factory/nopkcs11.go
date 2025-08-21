@@ -19,6 +19,16 @@ import (
 
 const pkcs11Enabled = false
 
+func getDefaultImpl() *FactoryOpts {
+	return &FactoryOpts{
+		Default: "",
+		SW: &SwOpts{
+			Security: 0,
+			Hash:     "",
+		},
+	}
+}
+
 // FactoryOpts holds configuration information used to initialize factory implementations
 type FactoryOpts struct {
 	Default string  `json:"default" yaml:"Default"`

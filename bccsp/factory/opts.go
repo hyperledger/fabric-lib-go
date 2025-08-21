@@ -9,13 +9,11 @@ package factory
 // GetDefaultOpts offers a default implementation for Opts
 // returns a new instance every time
 func GetDefaultOpts() *FactoryOpts {
-	return &FactoryOpts{
-		Default: "SW",
-		SW: &SwOpts{
-			Hash:     "SHA2",
-			Security: 256,
-		},
-	}
+	fopts := getDefaultImpl()
+	fopts.Default = "SW"
+	fopts.SW.Hash = "SHA2"
+	fopts.SW.Security = 256
+	return fopts
 }
 
 // FactoryName returns the name of the provider
