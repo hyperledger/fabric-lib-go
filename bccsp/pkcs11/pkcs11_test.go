@@ -10,6 +10,7 @@ SPDX-License-Identifier: Apache-2.0
 package pkcs11
 
 import (
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
@@ -327,6 +328,25 @@ func TestECDSASign(t *testing.T) {
 	})
 }
 
+func TestED25519Sign(t *testing.T) {
+	csp, cleanup := newProvider(t, defaultOptions())
+	csp.curve = oidEd25519
+	defer cleanup()
+
+	k, err := csp.KeyGen(&bccsp.ED25519KeyGenOpts{Temporary: false})
+	require.NoError(t, err)
+
+	msg := []byte("Hello World")
+
+	signature, err := csp.Sign(k, msg, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, signature, "signature must not be empty")
+
+	pubKey := k.(*ed25519PrivateKey).pub.pub
+	verify := ed25519.Verify(*pubKey, msg, signature)
+	require.True(t, verify, "signature must be verified")
+}
+
 type mapper struct {
 	input  []byte
 	result []byte
@@ -596,7 +616,8 @@ func TestCurveForSecurityLevel(t *testing.T) {
 	}{
 		256: {curve: oidNamedCurveP256},
 		384: {curve: oidNamedCurveP384},
-		512: {expectedErr: "Security level not supported [512]"},
+		// TODO: i do not know if that it is the correct form to trigger edwards curve
+		512: {curve: oidEd25519},
 	}
 
 	for level, tt := range tests {

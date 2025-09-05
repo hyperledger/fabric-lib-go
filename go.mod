@@ -4,7 +4,7 @@ go 1.24.2
 
 require (
 	github.com/go-kit/kit v0.13.0
-	github.com/miekg/pkcs11 v1.1.1
+	github.com/miekg/pkcs11 v1.1.1-0.20220104135131-d721e3fc6d90
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/onsi/ginkgo/v2 v2.20.2
 	github.com/onsi/gomega v1.34.2
