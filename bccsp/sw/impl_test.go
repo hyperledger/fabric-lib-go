@@ -12,6 +12,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/sha3"
 	"crypto/sha512"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -30,7 +31,6 @@ import (
 	"github.com/hyperledger/fabric-lib-go/bccsp/sw/mocks"
 	"github.com/hyperledger/fabric-lib-go/bccsp/utils"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 )
 
 var (

@@ -14,7 +14,6 @@ require (
 	github.com/stretchr/testify v1.9.0
 	github.com/sykesm/zap-logfmt v0.0.4
 	go.uber.org/zap v1.27.0
-	golang.org/x/crypto v0.37.0
 	golang.org/x/tools v0.28.0
 	google.golang.org/grpc v1.67.1
 )
