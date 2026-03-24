@@ -18,29 +18,29 @@ import (
 )
 
 func TestExportedInitFactories(t *testing.T) {
-	// Reset errors from previous negative test runs
-	factoriesInitError = initFactories(nil)
+	// Reset errors from previous negative test runs.
+	factoriesInitError.Store(nil)
 
 	err := InitFactories(nil)
 	require.NoError(t, err)
 }
 
 func TestInitFactories(t *testing.T) {
-	err := initFactories(nil)
+	_, err := initFactories(nil)
 	require.NoError(t, err)
 
-	err = initFactories(&FactoryOpts{})
+	_, err = initFactories(&FactoryOpts{})
 	require.NoError(t, err)
 }
 
 func TestInitFactoriesInvalidArgs(t *testing.T) {
-	err := initFactories(&FactoryOpts{
+	_, err := initFactories(&FactoryOpts{
 		Default: "SW",
 		SW:      &SwOpts{},
 	})
 	require.EqualError(t, err, "Failed initializing SW.BCCSP: Could not initialize BCCSP SW [Failed initializing configuration at [0,]: Hash Family not supported []]")
 
-	err = initFactories(&FactoryOpts{
+	_, err = initFactories(&FactoryOpts{
 		Default: "PKCS11",
 		PKCS11:  &pkcs11.PKCS11Opts{},
 	})
