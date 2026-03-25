@@ -7,7 +7,9 @@ SPDX-License-Identifier: Apache-2.0
 package pkcs11
 
 import (
+	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/asn1"
@@ -204,6 +206,13 @@ func (csp *Provider) KeyGen(opts bccsp.KeyGenOpts) (k bccsp.Key, err error) {
 		}
 
 		k = &ecdsaPrivateKey{ski, ecdsaPublicKey{ski, pub}}
+	case *bccsp.ED25519KeyGenOpts:
+		ski, pub, err := csp.generateED25519Key(oidEd25519, opts.Ephemeral())
+		if err != nil {
+			return nil, errors.Wrapf(err, "Failed generating ED25519 key")
+		}
+
+		k = &ed25519PrivateKey{ski, ed25519PublicKey{ski, pub}}
 
 	default:
 		return csp.BCCSP.KeyGen(opts)
@@ -232,15 +241,28 @@ func (csp *Provider) GetKey(ski []byte) (bccsp.Key, error) {
 		return key, nil
 	}
 
-	pubKey, isPriv, err := csp.getECKey(ski)
+	pubKey, isPriv, err := csp.getKey(ski)
 	if err != nil {
 		logger.Debugf("Key not found using PKCS11: %v", err)
 		return csp.BCCSP.GetKey(ski)
 	}
 
-	var key bccsp.Key = &ecdsaPublicKey{ski, pubKey}
-	if isPriv {
-		key = &ecdsaPrivateKey{ski, ecdsaPublicKey{ski, pubKey}}
+	var key bccsp.Key
+
+	switch pubKey := pubKey.(type) {
+	case *ecdsa.PublicKey:
+		key = &ecdsaPublicKey{ski, pubKey}
+		if isPriv {
+			key = &ecdsaPrivateKey{ski, ecdsaPublicKey{ski, pubKey}}
+		}
+	case ed25519.PublicKey:
+		ed25519Key := pubKey
+		key = &ed25519PublicKey{ski, &ed25519Key}
+		if isPriv {
+			key = &ed25519PrivateKey{ski, ed25519PublicKey{ski, &ed25519Key}}
+		}
+	default:
+		return nil, fmt.Errorf("Unsupported key type found in PKCS11 module")
 	}
 
 	csp.cacheKey(ski, key)
@@ -253,21 +275,23 @@ func (csp *Provider) GetKey(ski []byte) (bccsp.Key, error) {
 // Note that when a signature of a hash of a larger message is needed,
 // the caller is responsible for hashing the larger message and passing
 // the hash (as digest).
-func (csp *Provider) Sign(k bccsp.Key, digest []byte, opts bccsp.SignerOpts) ([]byte, error) {
+func (csp *Provider) Sign(k bccsp.Key, digestOrMsg []byte, opts bccsp.SignerOpts) ([]byte, error) {
 	// Validate arguments
 	if k == nil {
 		return nil, errors.New("Invalid Key. It must not be nil")
 	}
-	if len(digest) == 0 {
+	if len(digestOrMsg) == 0 {
 		return nil, errors.New("Invalid digest. Cannot be empty")
 	}
 
 	// Check key type
 	switch key := k.(type) {
 	case *ecdsaPrivateKey:
-		return csp.signECDSA(*key, digest)
+		return csp.signECDSA(*key, digestOrMsg)
+	case *ed25519PrivateKey:
+		return csp.signED25519(*key, digestOrMsg)
 	default:
-		return csp.BCCSP.Sign(key, digest, opts)
+		return csp.BCCSP.Sign(key, digestOrMsg, opts)
 	}
 }
 
@@ -283,6 +307,15 @@ func (csp *Provider) signECDSA(k ecdsaPrivateKey, digest []byte) ([]byte, error)
 	}
 
 	return utils.MarshalECDSASignature(r, s)
+}
+
+func (csp *Provider) signED25519(k ed25519PrivateKey, msg []byte) ([]byte, error) {
+	signature, err := csp.signP11ED25519(k.ski, msg)
+	if err != nil {
+		return nil, err
+	}
+
+	return signature, nil
 }
 
 // Verify verifies signature against key k and digest
@@ -301,7 +334,7 @@ func (csp *Provider) Verify(k bccsp.Key, signature, digest []byte, opts bccsp.Si
 	// key (k) will never be a pkcs11 key, do verify using the software implementation
 	// but validate it just in case
 	switch k.(type) {
-	case *ecdsaPrivateKey, *ecdsaPublicKey:
+	case *ecdsaPrivateKey, *ecdsaPublicKey, *ed25519PrivateKey, *ed25519PublicKey:
 		return false, errors.New("Unexpected pkcs11 key, expected software based key")
 	default:
 		return csp.BCCSP.Verify(k, signature, digest, opts)
@@ -399,7 +432,7 @@ func (csp *Provider) returnSession(session pkcs11.SessionHandle) {
 }
 
 // Look for an EC key by SKI, stored in CKA_ID
-func (csp *Provider) getECKey(ski []byte) (pubKey *ecdsa.PublicKey, isPriv bool, err error) {
+func (csp *Provider) getKey(ski []byte) (pubKey crypto.PublicKey, isPriv bool, err error) {
 	session, err := csp.getSession()
 	if err != nil {
 		return nil, false, err
@@ -418,7 +451,7 @@ func (csp *Provider) getECKey(ski []byte) (pubKey *ecdsa.PublicKey, isPriv bool,
 		return nil, false, fmt.Errorf("public key not found [%s] for SKI [%s]", err, hex.EncodeToString(ski))
 	}
 
-	ecpt, marshaledOid, err := csp.ecPoint(session, publicKey)
+	ecpt, marshaledOid, err := csp.ecOrEd25519Point(session, publicKey)
 	if err != nil {
 		return nil, false, fmt.Errorf("public key not found [%s] for SKI [%s]", err, hex.EncodeToString(ski))
 	}
@@ -427,6 +460,10 @@ func (csp *Provider) getECKey(ski []byte) (pubKey *ecdsa.PublicKey, isPriv bool,
 	_, err = asn1.Unmarshal(marshaledOid, curveOid)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed Unmarshalling Curve OID [%s]\n%s", err.Error(), hex.EncodeToString(marshaledOid))
+	}
+
+	if curveOid.Equal(oidEd25519) {
+		return ed25519.PublicKey(ecpt), isPriv, nil
 	}
 
 	curve := namedCurveFromOID(*curveOid)
@@ -463,6 +500,10 @@ var (
 	oidNamedCurveP521 = asn1.ObjectIdentifier{1, 3, 132, 0, 35}
 )
 
+//	ed25519 OBJECT IDENTIFIER ::= {
+//	  iso(1) identified-organization(3) thawte(101) id-Ed25519(112) }
+var oidEd25519 = asn1.ObjectIdentifier{1, 3, 101, 112}
+
 func namedCurveFromOID(oid asn1.ObjectIdentifier) elliptic.Curve {
 	switch {
 	case oid.Equal(oidNamedCurveP224):
@@ -483,6 +524,9 @@ func curveForSecurityLevel(securityLevel int) (asn1.ObjectIdentifier, error) {
 		return oidNamedCurveP256, nil
 	case 384:
 		return oidNamedCurveP384, nil
+	// TODO: i do not know if that it is the correct form to trigger edwards curve
+	case 512:
+		return oidEd25519, nil
 	default:
 		return nil, fmt.Errorf("Security level not supported [%d]", securityLevel)
 	}
@@ -538,7 +582,7 @@ func (csp *Provider) generateECKey(curve asn1.ObjectIdentifier, ephemeral bool) 
 		return nil, nil, fmt.Errorf("P11: keypair generate failed [%s]", err)
 	}
 
-	ecpt, _, err := csp.ecPoint(session, pub)
+	ecpt, _, err := csp.ecOrEd25519Point(session, pub)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Error querying EC-point: [%s]", err)
 	}
@@ -564,28 +608,7 @@ func (csp *Provider) generateECKey(curve asn1.ObjectIdentifier, ephemeral bool) 
 
 	// Set CKA_Modifible to false for both public key and private keys
 	if csp.immutable {
-		setCKAModifiable := []*pkcs11.Attribute{
-			pkcs11.NewAttribute(pkcs11.CKA_MODIFIABLE, false),
-		}
-
-		_, pubCopyerror := csp.ctx.CopyObject(session, pub, setCKAModifiable)
-		if pubCopyerror != nil {
-			return nil, nil, fmt.Errorf("P11: Public Key copy failed with error [%s] . Please contact your HSM vendor", pubCopyerror)
-		}
-
-		pubKeyDestroyError := csp.ctx.DestroyObject(session, pub)
-		if pubKeyDestroyError != nil {
-			return nil, nil, fmt.Errorf("P11: Public Key destroy failed with error [%s]. Please contact your HSM vendor", pubCopyerror)
-		}
-
-		_, prvCopyerror := csp.ctx.CopyObject(session, prv, setCKAModifiable)
-		if prvCopyerror != nil {
-			return nil, nil, fmt.Errorf("P11: Private Key copy failed with error [%s]. Please contact your HSM vendor", prvCopyerror)
-		}
-		prvKeyDestroyError := csp.ctx.DestroyObject(session, prv)
-		if prvKeyDestroyError != nil {
-			return nil, nil, fmt.Errorf("P11: Private Key destroy failed with error [%s]. Please contact your HSM vendor", prvKeyDestroyError)
-		}
+		csp.handleImmutableKeys(session, pub, prv)
 	}
 
 	nistCurve := namedCurveFromOID(curve)
@@ -605,6 +628,129 @@ func (csp *Provider) generateECKey(curve asn1.ObjectIdentifier, ephemeral bool) 
 	}
 
 	return ski, pubGoKey, nil
+}
+
+func (csp *Provider) generateED25519Key(curve asn1.ObjectIdentifier, ephemeral bool) (ski []byte, pubKey *ed25519.PublicKey, err error) {
+	session, err := csp.getSession()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { csp.handleSessionReturn(err, session) }()
+
+	id := nextIDCtr()
+	publabel := fmt.Sprintf("BCPUB%s", id.Text(16))
+	prvlabel := fmt.Sprintf("BCPRV%s", id.Text(16))
+
+	marshaledOID, err := asn1.Marshal(curve)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Could not marshal OID [%s]", err.Error())
+	}
+
+	pubkeyT := []*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_KEY_TYPE, pkcs11.CKK_EC_EDWARDS),
+		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PUBLIC_KEY),
+		pkcs11.NewAttribute(pkcs11.CKA_TOKEN, !ephemeral),
+		pkcs11.NewAttribute(pkcs11.CKA_VERIFY, true),
+		pkcs11.NewAttribute(pkcs11.CKA_EC_PARAMS, marshaledOID),
+
+		pkcs11.NewAttribute(pkcs11.CKA_ID, publabel),
+		pkcs11.NewAttribute(pkcs11.CKA_LABEL, publabel),
+	}
+
+	prvkeyT := []*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_KEY_TYPE, pkcs11.CKK_EC_EDWARDS),
+		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY),
+		pkcs11.NewAttribute(pkcs11.CKA_TOKEN, !ephemeral),
+		pkcs11.NewAttribute(pkcs11.CKA_PRIVATE, true),
+		pkcs11.NewAttribute(pkcs11.CKA_SIGN, true),
+
+		pkcs11.NewAttribute(pkcs11.CKA_ID, prvlabel),
+		pkcs11.NewAttribute(pkcs11.CKA_LABEL, prvlabel),
+
+		pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, false),
+		pkcs11.NewAttribute(pkcs11.CKA_SENSITIVE, true),
+	}
+
+	pub, prv, err := csp.ctx.GenerateKeyPair(session,
+		[]*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_EC_EDWARDS_KEY_PAIR_GEN, nil)},
+		pubkeyT,
+		prvkeyT,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("P11: keypair generate failed [%s]", err)
+	}
+
+	ecpt, _, err := csp.ecOrEd25519Point(session, pub)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error querying EC-point: [%s]", err)
+	}
+	hash := sha256.Sum256(ecpt)
+	ski = hash[:]
+
+	err = csp.setSkiAsId(ski, prv, pub, session)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Set CKA_Modifible to false for both public key and private keys
+	if csp.immutable {
+		csp.handleImmutableKeys(session, pub, prv)
+	}
+
+	var pubGoKey ed25519.PublicKey = ecpt
+
+	if logger.IsEnabledFor(zapcore.DebugLevel) {
+		listAttrs(csp.ctx, session, prv)
+		listAttrs(csp.ctx, session, pub)
+	}
+
+	return ski, &pubGoKey, nil
+}
+
+func (csp *Provider) setSkiAsId(ski []byte, prv, pub pkcs11.ObjectHandle, session pkcs11.SessionHandle) error {
+	// set CKA_ID of the both keys to SKI(public key) and CKA_LABEL to hex string of SKI
+	setskiT := []*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_ID, ski),
+		pkcs11.NewAttribute(pkcs11.CKA_LABEL, hex.EncodeToString(ski)),
+	}
+
+	logger.Infof("Generated new P11 key, SKI %x\n", ski)
+	err := csp.ctx.SetAttributeValue(session, pub, setskiT)
+	if err != nil {
+		return fmt.Errorf("P11: set-ID-to-SKI[public] failed [%s]", err)
+	}
+
+	err = csp.ctx.SetAttributeValue(session, prv, setskiT)
+	if err != nil {
+		return fmt.Errorf("P11: set-ID-to-SKI[private] failed [%s]", err)
+	}
+	return nil
+}
+
+func (csp *Provider) handleImmutableKeys(session pkcs11.SessionHandle, pub pkcs11.ObjectHandle, prv pkcs11.ObjectHandle) error {
+	setCKAModifiable := []*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_MODIFIABLE, false),
+	}
+
+	_, pubCopyerror := csp.ctx.CopyObject(session, pub, setCKAModifiable)
+	if pubCopyerror != nil {
+		return fmt.Errorf("P11: Public Key copy failed with error [%s] . Please contact your HSM vendor", pubCopyerror)
+	}
+
+	pubKeyDestroyError := csp.ctx.DestroyObject(session, pub)
+	if pubKeyDestroyError != nil {
+		return fmt.Errorf("P11: Public Key destroy failed with error [%s]. Please contact your HSM vendor", pubCopyerror)
+	}
+
+	_, prvCopyerror := csp.ctx.CopyObject(session, prv, setCKAModifiable)
+	if prvCopyerror != nil {
+		return fmt.Errorf("P11: Private Key copy failed with error [%s]. Please contact your HSM vendor", prvCopyerror)
+	}
+	prvKeyDestroyError := csp.ctx.DestroyObject(session, prv)
+	if prvKeyDestroyError != nil {
+		return fmt.Errorf("P11: Private Key destroy failed with error [%s]. Please contact your HSM vendor", prvKeyDestroyError)
+	}
+	return nil
 }
 
 func (csp *Provider) signP11ECDSA(ski []byte, msg []byte) (R, S *big.Int, err error) {
@@ -637,6 +783,35 @@ func (csp *Provider) signP11ECDSA(ski []byte, msg []byte) (R, S *big.Int, err er
 	S.SetBytes(sig[len(sig)/2:])
 
 	return R, S, nil
+}
+
+func (csp *Provider) signP11ED25519(ski []byte, msg []byte) (signature []byte, err error) {
+	session, err := csp.getSession()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { csp.handleSessionReturn(err, session) }()
+
+	privateKey, err := csp.findKeyPairFromSKI(session, ski, privateKeyType)
+	if err != nil {
+		return nil, fmt.Errorf("Private key not found [%s]", err)
+	}
+
+	err = csp.ctx.SignInit(session, []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_EDDSA, nil)}, privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("Sign-initialize  failed [%s]", err)
+	}
+
+	var sig []byte
+
+	sig, err = csp.ctx.Sign(session, msg)
+	if err != nil {
+		return nil, fmt.Errorf("P11: sign failed [%s]", err)
+	}
+
+	signature = make([]byte, len(sig))
+	copy(signature, sig)
+	return signature, nil
 }
 
 func (csp *Provider) verifyP11ECDSA(ski []byte, msg []byte, R, S *big.Int, byteSize int) (bool, error) {
@@ -791,7 +966,14 @@ func (csp *Provider) findKeyPairFromSKI(session pkcs11.SessionHandle, ski []byte
 // 00000020  19 de ef 32 46 50 68 02  24 62 36 db ed b1 84 7b  |...2FPh.$b6....{|
 // 00000030  93 d8 40 c3 d5 a6 b7 38  16 d2 35 0a 53 11 f9 51  |..@....8..5.S..Q|
 // 00000040  fc a7 16                                          |...|
-func (csp *Provider) ecPoint(session pkcs11.SessionHandle, key pkcs11.ObjectHandle) (ecpt, oid []byte, err error) {
+//
+// In the case of ed25519, SoftHSM returns a leading 0x20 byte after the 0x04
+// which indicates the length of the point (32 bytes):
+//
+// 00000000  04 20 9d 61 b1 9d ef fd  5c 4e 6c 9c f5 8c 2c 3f
+// 00000010  f4 0a 49 82 16 1b 32 b8  0a 4d f4 6e 8d e9 8d 0b
+// 00000020  a7 0b
+func (csp *Provider) ecOrEd25519Point(session pkcs11.SessionHandle, key pkcs11.ObjectHandle) (ecpt, oid []byte, err error) {
 	template := []*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_EC_POINT, nil),
 		pkcs11.NewAttribute(pkcs11.CKA_EC_PARAMS, nil),
@@ -815,11 +997,14 @@ func (csp *Provider) ecPoint(session pkcs11.SessionHandle, key pkcs11.ObjectHand
 			} else if byte(0x04) == a.Value[0] && byte(0x04) == a.Value[2] {
 				logger.Debugf("Detected SoftHSM bug, trimming leading 0x04 0xXX")
 				ecpt = a.Value[2:len(a.Value)]
+			} else if byte(0x04) == a.Value[0] && byte(0x20) == a.Value[1] {
+				logger.Debugf("Detected SoftHSM Ed25519 bug, trimming leading 0x04 0x20")
+				ecpt = a.Value[2:len(a.Value)]
 			} else {
 				ecpt = a.Value
 			}
 		} else if a.Type == pkcs11.CKA_EC_PARAMS {
-			logger.Debugf("EC point: attr type %d/0x%x, len %d\n%s\n", a.Type, a.Type, len(a.Value), hex.Dump(a.Value))
+			logger.Debugf("EC or ED25519 point: attr type %d/0x%x, len %d\n%s\n", a.Type, a.Type, len(a.Value), hex.Dump(a.Value))
 
 			oid = a.Value
 		}
