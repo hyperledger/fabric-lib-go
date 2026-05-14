@@ -16,6 +16,8 @@ import (
 	"encoding/asn1"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -89,13 +91,14 @@ func TestNew(t *testing.T) {
 		require.Equal(t, defaultCreateSessionRetries, csp.createSessionRetries)
 		require.Equal(t, defaultCreateSessionRetryDelay, csp.createSessionRetryDelay)
 		require.Equal(t, defaultSessionCacheSize, cap(csp.sessPool))
+		require.NotNil(t, csp.sessSem)
 	})
 
 	t.Run("ConditionalOverride", func(t *testing.T) {
 		opts := defaultOptions()
 		opts.createSessionRetries = 3
 		opts.createSessionRetryDelay = time.Second
-		opts.sessionCacheSize = -1
+		opts.SessionCacheSize = 7
 
 		csp, err := New(opts, ks)
 		require.NoError(t, err)
@@ -103,7 +106,8 @@ func TestNew(t *testing.T) {
 
 		require.Equal(t, 3, csp.createSessionRetries)
 		require.Equal(t, time.Second, csp.createSessionRetryDelay)
-		require.Nil(t, csp.sessPool)
+		require.Equal(t, 7, cap(csp.sessPool))
+		require.NotNil(t, csp.sessSem)
 	})
 }
 
@@ -564,7 +568,12 @@ func TestInitialize(t *testing.T) {
 	})
 
 	t.Run("MissingPin", func(t *testing.T) {
-		_, err := (&Provider{}).initialize(PKCS11Opts{Library: lib, Pin: "", Label: label})
+		opts := defaultOptions()
+		opts.Library = lib
+		opts.Label = label
+		opts.Pin = ""
+
+		_, err := New(opts, newKeyStore(t))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "Login failed: pkcs11")
 	})
@@ -614,35 +623,56 @@ func TestCurveForSecurityLevel(t *testing.T) {
 
 func TestPKCS11GetSession(t *testing.T) {
 	opts := defaultOptions()
-	opts.sessionCacheSize = 5
+	opts.SessionCacheSize = 5
 	csp, cleanup := newProvider(t, opts)
 	defer cleanup()
 
-	sessionCacheSize := opts.sessionCacheSize
+	sessionCacheSize := int(opts.SessionCacheSize)
 	var sessions []pkcs11.SessionHandle
-	for i := 0; i < 3*sessionCacheSize; i++ {
-		session, err := csp.getSession()
-		require.NoError(t, err)
-		sessions = append(sessions, session)
-	}
-
-	// Return all sessions, should leave sessionCacheSize cached
-	for _, session := range sessions {
-		csp.returnSession(session)
-	}
-
-	// Should be able to get sessionCacheSize cached sessions
-	sessions = nil
 	for i := 0; i < sessionCacheSize; i++ {
 		session, err := csp.getSession()
 		require.NoError(t, err)
 		sessions = append(sessions, session)
 	}
+	require.Len(t, csp.sessions, sessionCacheSize)
 
-	// Cleanup
+	blockedSession := make(chan pkcs11.SessionHandle, 1)
+	blockedErr := make(chan error, 1)
+	go func() {
+		session, err := csp.getSession()
+		if err != nil {
+			blockedErr <- err
+			return
+		}
+		blockedSession <- session
+	}()
+
+	select {
+	case session := <-blockedSession:
+		csp.returnSession(session)
+		t.Fatal("getSession should block when all cached sessions are checked out")
+	case err := <-blockedErr:
+		require.NoError(t, err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	csp.returnSession(sessions[0])
+	select {
+	case sessions[0] = <-blockedSession:
+	case err := <-blockedErr:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("getSession did not resume after a session was returned")
+	}
+
+	// Return all sessions, should leave sessionCacheSize cached.
 	for _, session := range sessions {
 		csp.returnSession(session)
 	}
+	require.Len(t, csp.sessions, sessionCacheSize)
+	require.Len(t, csp.sessPool, sessionCacheSize)
+
+	// Cleanup
 }
 
 func TestSessionHandleCaching(t *testing.T) {
@@ -660,92 +690,72 @@ func TestSessionHandleCaching(t *testing.T) {
 		require.Equal(t, h, privHandle)
 	}
 
-	t.Run("SessionCacheDisabled", func(t *testing.T) {
-		opts := defaultOptions()
-		opts.sessionCacheSize = -1
-
-		csp, cleanup := newProvider(t, opts)
-		defer cleanup()
-
-		require.Nil(t, csp.sessPool, "sessPool channel should be nil")
-		require.Empty(t, csp.sessions, "sessions set should be empty")
-		require.Empty(t, csp.handleCache, "handleCache should be empty")
-
-		sess1, err := csp.getSession()
-		require.NoError(t, err)
-		require.Len(t, csp.sessions, 1, "expected one open session")
-
-		sess2, err := csp.getSession()
-		require.NoError(t, err)
-		require.Len(t, csp.sessions, 2, "expected two open sessions")
-
-		// Generate a key
-		k, err := csp.KeyGen(&bccsp.ECDSAP256KeyGenOpts{Temporary: false})
-		require.NoError(t, err)
-		verifyHandleCache(t, csp, sess1, k)
-		require.Len(t, csp.handleCache, 2, "expected two handles in handle cache")
-
-		csp.returnSession(sess1)
-		require.Len(t, csp.sessions, 1, "expected one open session")
-		verifyHandleCache(t, csp, sess1, k)
-		require.Len(t, csp.handleCache, 2, "expected two handles in handle cache")
-
-		csp.returnSession(sess2)
-		require.Empty(t, csp.sessions, "expected sessions to be empty")
-		require.Empty(t, csp.handleCache, "expected handles to be cleared")
-	})
-
 	t.Run("SessionCacheEnabled", func(t *testing.T) {
 		opts := defaultOptions()
-		opts.sessionCacheSize = 1
+		opts.SessionCacheSize = 1
 
 		csp, cleanup := newProvider(t, opts)
 		defer cleanup()
 
 		require.NotNil(t, csp.sessPool, "sessPool channel should not be nil")
 		require.Equal(t, 1, cap(csp.sessPool))
+		require.NotNil(t, csp.sessSem, "sessSem should not be nil")
 		require.Len(t, csp.sessions, 1, "sessions should contain login session")
 		require.Len(t, csp.sessPool, 1, "sessionPool should hold login session")
 		require.Empty(t, csp.handleCache, "handleCache should be empty")
+
+		k, err := csp.KeyGen(&bccsp.ECDSAP256KeyGenOpts{Temporary: false})
+		require.NoError(t, err)
+		require.Len(t, csp.sessions, 1, "expected one open session")
+		require.Len(t, csp.sessPool, 1, "sessionPool should hold returned session")
 
 		sess1, err := csp.getSession()
 		require.NoError(t, err)
 		require.Len(t, csp.sessions, 1, "expected one open session (sess1 from login)")
 		require.Len(t, csp.sessPool, 0, "sessionPool should be empty")
-
-		sess2, err := csp.getSession()
-		require.NoError(t, err)
-		require.Len(t, csp.sessions, 2, "expected two open sessions (sess1 and sess2)")
-		require.Len(t, csp.sessPool, 0, "sessionPool should be empty")
-
-		// Generate a key
-		k, err := csp.KeyGen(&bccsp.ECDSAP256KeyGenOpts{Temporary: false})
-		require.NoError(t, err)
 		verifyHandleCache(t, csp, sess1, k)
 		require.Len(t, csp.handleCache, 2, "expected two handles in handle cache")
+
+		blockedSession := make(chan pkcs11.SessionHandle, 1)
+		blockedErr := make(chan error, 1)
+		go func() {
+			session, err := csp.getSession()
+			if err != nil {
+				blockedErr <- err
+				return
+			}
+			blockedSession <- session
+		}()
+		select {
+		case session := <-blockedSession:
+			csp.returnSession(session)
+			t.Fatal("getSession should block when the session cache size limit is reached")
+		case err := <-blockedErr:
+			require.NoError(t, err)
+		case <-time.After(100 * time.Millisecond):
+		}
 
 		csp.returnSession(sess1)
-		require.Len(t, csp.sessions, 2, "expected two open sessions (sess2 in-use, sess1 cached)")
-		require.Len(t, csp.sessPool, 1, "sessionPool should have one handle (sess1)")
-		verifyHandleCache(t, csp, sess1, k)
-		require.Len(t, csp.handleCache, 2, "expected two handles in handle cache")
-
-		csp.returnSession(sess2)
-		require.Len(t, csp.sessions, 1, "expected one cached session (sess1)")
-		require.Len(t, csp.sessPool, 1, "sessionPool should have one handle (sess1)")
-		require.Len(t, csp.handleCache, 2, "expected two handles in handle cache")
-
-		_, err = csp.getSession()
-		require.NoError(t, err)
+		select {
+		case sess1 = <-blockedSession:
+		case err := <-blockedErr:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("getSession did not resume after a session was returned")
+		}
 		require.Len(t, csp.sessions, 1, "expected one open session (sess1)")
 		require.Len(t, csp.sessPool, 0, "sessionPool should be empty")
 		require.Len(t, csp.handleCache, 2, "expected two handles in handle cache")
+
+		csp.returnSession(sess1)
+		require.Len(t, csp.sessions, 1, "expected one cached session")
+		require.Len(t, csp.sessPool, 1, "sessionPool should have one handle")
 	})
 }
 
 func TestKeyCache(t *testing.T) {
 	opts := defaultOptions()
-	opts.sessionCacheSize = 1
+	opts.SessionCacheSize = 1
 	csp, cleanup := newProvider(t, opts)
 	defer cleanup()
 
@@ -854,21 +864,95 @@ func TestDelegation(t *testing.T) {
 
 func TestHandleSessionReturn(t *testing.T) {
 	opts := defaultOptions()
-	opts.sessionCacheSize = 5
+	opts.SessionCacheSize = 5
 	csp, cleanup := newProvider(t, opts)
 	defer cleanup()
 
-	// Retrieve and destroy default session created during initialization
+	// Pull the login session, invalidate it via a raw PKCS#11 CloseSession
+	// so the handle is still tracked in csp.sessions but unusable, then
+	// push it back through returnSession to cache the invalid handle.
 	session, err := csp.getSession()
 	require.NoError(t, err)
-	csp.closeSession(session)
+	require.NoError(t, csp.ctx.CloseSession(session))
+	csp.returnSession(session)
+	require.Len(t, csp.sessPool, 1, "invalidated session should be cached")
 
-	// Verify session pool is empty and place invalid session in pool
-	require.Empty(t, csp.sessPool, "sessionPool should be empty")
-	csp.returnSession(pkcs11.SessionHandle(^uint(0)))
-
-	// Attempt to generate key with invalid session
+	// KeyGen pulls the invalid handle from the pool; handleSessionReturn
+	// must remove it via closeSession so the pool ends up empty.
 	_, err = csp.KeyGen(&bccsp.ECDSAP256KeyGenOpts{Temporary: false})
 	require.EqualError(t, err, "Failed generating ECDSA P256 key: P11: keypair generate failed [pkcs11: 0xB3: CKR_SESSION_HANDLE_INVALID]")
 	require.Empty(t, csp.sessPool, "sessionPool should be empty")
+}
+
+// TestPKCS11SessionLimit recreates the unbounded-session-creation problem
+// reported in issue #50. The Provider is configured with a small session
+// cache, then many concurrent callers each acquire a session, hold it
+// briefly, and return it. The test records the peak number of sessions
+// outstanding (tracked in csp.sessions) over the run.
+//
+// Without a bound on concurrent OpenSession calls, every caller whose
+// arrival finds an empty sessPool falls through to createSession() and
+// opens a brand new PKCS#11 session, so the peak grows with the number
+// of concurrent callers regardless of sessionCacheSize. Under high sign
+// concurrency that causes the PKCS#11 token to return CKR_SESSION_COUNT
+// on OpenSession and subsequent CKR_DEVICE_ERROR on operations.
+//
+// On the current upstream main this test fails with peak == callers
+// (e.g. 25 outstanding for a sessionCacheSize=5 cap). The PR limits
+// concurrent OpenSession via a semaphore.Weighted, so the same test
+// passes with peak == sessionCacheSize.
+func TestPKCS11SessionLimit(t *testing.T) {
+	// Exercise the package default so the limit under test matches what
+	// production callers will actually see, not a test-only override.
+	const (
+		cacheSize = defaultSessionCacheSize
+		callers   = 5 * defaultSessionCacheSize
+		holdFor   = 50 * time.Millisecond
+	)
+
+	opts := defaultOptions()
+	csp, cleanup := newProvider(t, opts)
+	defer cleanup()
+
+	countOutstanding := func() int32 {
+		csp.sessLock.Lock()
+		defer csp.sessLock.Unlock()
+		return int32(len(csp.sessions))
+	}
+
+	var peak int32
+	recordPeak := func() {
+		cur := countOutstanding()
+		for {
+			p := atomic.LoadInt32(&peak)
+			if cur <= p || atomic.CompareAndSwapInt32(&peak, p, cur) {
+				return
+			}
+		}
+	}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			sess, err := csp.getSession()
+			if err != nil {
+				t.Errorf("getSession: %v", err)
+				return
+			}
+			recordPeak()
+			time.Sleep(holdFor)
+			csp.returnSession(sess)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	require.LessOrEqualf(t, peak, int32(cacheSize),
+		"peak concurrent open PKCS#11 sessions %d exceeded sessionCacheSize %d "+
+			"(unbounded createSession fall-through; see issue #50)",
+		peak, cacheSize)
 }
