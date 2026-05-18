@@ -415,12 +415,8 @@ func (csp *Provider) closeSession(session pkcs11.SessionHandle) {
 }
 
 func (csp *Provider) returnSession(session pkcs11.SessionHandle) {
-	select {
-	case csp.sessPool <- session:
-		csp.sessSem.Release(1)
-	default:
-		csp.closeSession(session)
-	}
+	csp.sessPool <- session
+	csp.sessSem.Release(1)
 }
 
 // Look for an EC key by SKI, stored in CKA_ID
