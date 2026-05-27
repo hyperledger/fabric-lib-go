@@ -35,7 +35,7 @@ vet:
 .PHONY: gotools
 gotools:
 	@echo "Installing goimports..."
-	@cd tools && GOBIN=$(abspath $(GOTOOLS_BINDIR)) go install golang.org/x/tools/cmd/goimports
+	@cd tools && GOBIN=$(abspath $(GOTOOLS_BINDIR)) go install tool
 
 .PHONY: unit-tests
 unit-tests:
