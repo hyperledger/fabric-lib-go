@@ -417,7 +417,7 @@ func (v *Viper) GetEnvPrefix() string {
 
 func (v *Viper) mergeWithEnvPrefix(in string) string {
 	if v.envPrefix != "" {
-		return strings.ToUpper(v.envPrefix + "_" + in)
+		return strings.ToUpper(v.envPrefix + "_" + v.envKeyReplacer.Replace(in))
 	}
 
 	return strings.ToUpper(in)
@@ -950,7 +950,8 @@ func (v *Viper) Unmarshal(rawVal any, opts ...DecoderConfigOption) error {
 	}
 
 	// TODO: struct keys should be enough?
-	return decode(v.getSettings(keys), v.defaultDecoderConfig(rawVal, opts...))
+	s := v.getSettings(keys)
+	return decode(s, v.defaultDecoderConfig(rawVal, opts...))
 }
 
 func (v *Viper) decodeStructKeys(input any, opts ...DecoderConfigOption) ([]string, error) {
