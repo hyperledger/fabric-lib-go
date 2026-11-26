@@ -25,6 +25,15 @@ const (
 	// ED25519 Algorithm
 	ED25519 = "ED25519"
 
+	// MLDSA ML-DSA post-quantum signature algorithm (FIPS 204), any parameter set
+	MLDSA = "MLDSA"
+	// MLDSA44 ML-DSA with the ML-DSA-44 parameter set
+	MLDSA44 = "MLDSA44"
+	// MLDSA65 ML-DSA with the ML-DSA-65 parameter set
+	MLDSA65 = "MLDSA65"
+	// MLDSA87 ML-DSA with the ML-DSA-87 parameter set
+	MLDSA87 = "MLDSA87"
+
 	// RSA at the default security level.
 	// Each BCCSP may or may not support default security level. If not supported than
 	// an error will be returned.
@@ -186,6 +195,86 @@ func (opts *ED25519GoPublicKeyImportOpts) Algorithm() string {
 // Ephemeral returns true if the key to generate has to be ephemeral,
 // false otherwise.
 func (opts *ED25519GoPublicKeyImportOpts) Ephemeral() bool {
+	return opts.Temporary
+}
+
+// MLDSA44KeyGenOpts contains options for ML-DSA-44 key generation.
+type MLDSA44KeyGenOpts struct {
+	Temporary bool
+}
+
+// Algorithm returns the key generation algorithm identifier (to be used).
+func (opts *MLDSA44KeyGenOpts) Algorithm() string {
+	return MLDSA44
+}
+
+// Ephemeral returns true if the key to generate has to be ephemeral,
+// false otherwise.
+func (opts *MLDSA44KeyGenOpts) Ephemeral() bool {
+	return opts.Temporary
+}
+
+// MLDSA65KeyGenOpts contains options for ML-DSA-65 key generation.
+type MLDSA65KeyGenOpts struct {
+	Temporary bool
+}
+
+// Algorithm returns the key generation algorithm identifier (to be used).
+func (opts *MLDSA65KeyGenOpts) Algorithm() string {
+	return MLDSA65
+}
+
+// Ephemeral returns true if the key to generate has to be ephemeral,
+// false otherwise.
+func (opts *MLDSA65KeyGenOpts) Ephemeral() bool {
+	return opts.Temporary
+}
+
+// MLDSA87KeyGenOpts contains options for ML-DSA-87 key generation.
+type MLDSA87KeyGenOpts struct {
+	Temporary bool
+}
+
+// Algorithm returns the key generation algorithm identifier (to be used).
+func (opts *MLDSA87KeyGenOpts) Algorithm() string {
+	return MLDSA87
+}
+
+// Ephemeral returns true if the key to generate has to be ephemeral,
+// false otherwise.
+func (opts *MLDSA87KeyGenOpts) Ephemeral() bool {
+	return opts.Temporary
+}
+
+// MLDSAPrivateKeyImportOpts contains options for ML-DSA private key importation in PKCS#8 DER format.
+type MLDSAPrivateKeyImportOpts struct {
+	Temporary bool
+}
+
+// Algorithm returns the key importation algorithm identifier (to be used).
+func (opts *MLDSAPrivateKeyImportOpts) Algorithm() string {
+	return MLDSA
+}
+
+// Ephemeral returns true if the key to generate has to be ephemeral,
+// false otherwise.
+func (opts *MLDSAPrivateKeyImportOpts) Ephemeral() bool {
+	return opts.Temporary
+}
+
+// MLDSAGoPublicKeyImportOpts contains options for ML-DSA key importation from *mldsa.PublicKey
+type MLDSAGoPublicKeyImportOpts struct {
+	Temporary bool
+}
+
+// Algorithm returns the key importation algorithm identifier (to be used).
+func (opts *MLDSAGoPublicKeyImportOpts) Algorithm() string {
+	return MLDSA
+}
+
+// Ephemeral returns true if the key to generate has to be ephemeral,
+// false otherwise.
+func (opts *MLDSAGoPublicKeyImportOpts) Ephemeral() bool {
 	return opts.Temporary
 }
 
