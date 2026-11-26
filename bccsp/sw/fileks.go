@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/mldsa"
 	"crypto/rsa"
 	"encoding/hex"
 	"errors"
@@ -147,6 +148,8 @@ func (ks *fileBasedKeyStore) GetKey(ski []byte) (bccsp.Key, error) {
 			return &ed25519PrivateKey{&k}, nil
 		case *rsa.PrivateKey:
 			return &rsaPrivateKey{k}, nil
+		case *mldsa.PrivateKey:
+			return &mldsaPrivateKey{k}, nil
 		default:
 			return nil, errors.New("secret key type not recognized")
 		}
@@ -164,6 +167,8 @@ func (ks *fileBasedKeyStore) GetKey(ski []byte) (bccsp.Key, error) {
 			return &ed25519PublicKey{&k}, nil
 		case *rsa.PublicKey:
 			return &rsaPublicKey{k}, nil
+		case *mldsa.PublicKey:
+			return &mldsaPublicKey{k}, nil
 		default:
 			return nil, errors.New("public key type not recognized")
 		}
@@ -227,6 +232,18 @@ func (ks *fileBasedKeyStore) StoreKey(k bccsp.Key) (err error) {
 			return fmt.Errorf("failed storing AES key [%s]", err)
 		}
 
+	case *mldsaPrivateKey:
+		err = ks.storePrivateKey(hex.EncodeToString(k.SKI()), kk.privKey)
+		if err != nil {
+			return fmt.Errorf("failed storing ML-DSA private key [%s]", err)
+		}
+
+	case *mldsaPublicKey:
+		err = ks.storePublicKey(hex.EncodeToString(k.SKI()), kk.pubKey)
+		if err != nil {
+			return fmt.Errorf("failed storing ML-DSA public key [%s]", err)
+		}
+
 	default:
 		return fmt.Errorf("key type not reconigned [%s]", k)
 	}
@@ -267,6 +284,8 @@ func (ks *fileBasedKeyStore) searchKeystoreForSKI(ski []byte) (k bccsp.Key, err 
 			k = &ed25519PrivateKey{&kk}
 		case *rsa.PrivateKey:
 			k = &rsaPrivateKey{kk}
+		case *mldsa.PrivateKey:
+			k = &mldsaPrivateKey{kk}
 		default:
 			continue
 		}
